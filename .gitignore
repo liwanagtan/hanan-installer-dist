@@ -1,0 +1,6 @@
+/release/
+/staging/
+*.tar.gz
+*.sha256
+*.sig
+*manifest.json
