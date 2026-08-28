@@ -202,27 +202,28 @@ validate_password() {
 prompt_password() {
   local var="$1" label="$2" admin_tty="$3" value confirm
   if [ -n "${!var:-}" ]; then
-    validate_password "$label" "${!var}"
+    value="${!var}"
+    validate_password "$label" "$value"
     info "$label: using HANAN_*_PASSWORD override"
-    return
+  else
+    printf 'Generate a strong random %s automatically? [Y/n]: ' "$label" >/dev/tty
+    IFS= read -r answer </dev/tty || true
+    case "${answer:-y}" in
+      [Yy]*)
+        value="$(openssl rand -hex 32)" ||
+          fail "could not generate $label"
+        ;;
+      *)
+        printf '%s (hidden): ' "$label" >/dev/tty
+        IFS= read -rs value </dev/tty || fail "could not read $label"
+        printf '%s (confirm): ' "$label" >/dev/tty
+        IFS= read -rs confirm </dev/tty || fail "could not read $label confirmation"
+        [ "$value" = "$confirm" ] || fail "$label values did not match"
+        printf '\n' >/dev/tty
+        ;;
+    esac
+    validate_password "$label" "$value"
   fi
-  printf 'Generate a strong random %s automatically? [Y/n]: ' "$label" >/dev/tty
-  IFS= read -r answer </dev/tty || true
-  case "${answer:-y}" in
-    [Yy]*)
-      value="$(openssl rand -hex 32)" ||
-        fail "could not generate $label"
-      ;;
-    *)
-      printf '%s (hidden): ' "$label" >/dev/tty
-      IFS= read -rs value </dev/tty || fail "could not read $label"
-      printf '%s (confirm): ' "$label" >/dev/tty
-      IFS= read -rs confirm </dev/tty || fail "could not read $label confirmation"
-      [ "$value" = "$confirm" ] || fail "$label values did not match"
-      printf '\n' >/dev/tty
-      ;;
-  esac
-  validate_password "$label" "$value"
   printf '%s' "$value" >"$admin_tty" && chmod 0600 "$admin_tty"
 }
 
