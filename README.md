@@ -55,6 +55,69 @@ Environment overrides (all optional):
 | `HANAN_OPERATOR_PASSWORD` | Operator password (must still meet 16–128 chars, safe charset) |
 | `HANAN_MQTT_PASSWORD` | MQTT password (must differ from operator) |
 
+## `<hanan>` command reference
+
+`hanan` is a single binary with subcommands. Run `hanan` with no arguments to
+print usage. After `curl | bash` installs, `hanan` lives in the Foundation
+runtime and can be run via `sudo hanan <command>` (or `sudo /opt/hanan/scripts/hanan <command>`).
+
+| Command | Purpose |
+| --- | --- |
+| `version` | Print the Hanan Foundation version |
+| `doctor` / `status` / `verify` | Check the health of Hanan Foundation |
+| `install` | Plan, check, or install Hanan Foundation |
+| `backup` | Create a local backup of the Foundation |
+| `restore <archive>` | Restore from a backup archive |
+| `offhost-backup <path> <passphrase-file>` | Export an encrypted backup to external storage |
+| `audit verify` | Verify the security audit chain |
+| `security-update` | Apply host security package updates |
+| `rotate-mqtt` | Rotate MQTT credentials with automatic rollback |
+| `upgrade` | Upgrade the Foundation with a pre-backup checkpoint |
+| `rollback` | Roll back to the previous backup |
+| `health-report` | Generate a privacy-safe health JSON report |
+| `support-bundle` | Create a redacted support archive |
+| `profile` | List or show Hanan Profiles |
+
+### `hanan install` subcommands
+
+```text
+Usage: hanan install <action> [options]
+
+Actions:
+  --dry-run, -n         Print the installation plan without making changes
+  --check               Validate host readiness without making changes
+  --apply               Install Hanan Foundation (requires release inputs)
+  --store-token         Store a Home Assistant long-lived access token
+  --resume              Resume after onboarding (requires --apply first)
+```
+
+Production `--apply` requires:
+
+```text
+--deployment, --release-archive, --release-manifest, --release-checksum,
+--release-signature, --release-public-key, --site-manifest,
+--operator-password-file, --mqtt-password-file
+```
+
+Optional flags:
+
+```text
+--deployment customer|lab    Hanan deployment type (required)
+--profile home               Select a Hanan Profile for this space
+--provision                  Generate the site manifest interactively
+--provision-tty              Read provisioning prompts from /dev/tty
+                             (use with --provision under curl | bash)
+--hostname, --timezone, --lan-cidr, --zigbee-adapter
+--beszel-token-file          Optional Beszel agent token file (mode 0600)
+--beszel-hub                 Install this box as the central Beszel hub
+```
+
+Additionally, `--apply` accepts a JSON config file in place of most flags:
+
+```bash
+sudo hanan install --apply --config /root/install.json
+```
+
 ## Release model
 
 - A release in this repo is created by the CI workflow in the private
