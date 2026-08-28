@@ -11,8 +11,9 @@
 #   3. Download and checksum-verify the `hanan` CLI binary.
 #   4. Download and verify the signed hanan-foundation release
 #      (archive checksum, manifest digest, and OpenSSL signature).
-#   5. Prompt (from /dev/tty) for deployment type, profile, LAN CIDR and
-#      the operator/MQTT passwords, which are written to root-owned 0600 files.
+#   5. Prompt (from /dev/tty) for deployment type, profile, LAN CIDR, the
+#      operator/MQTT passwords, and an optional Beszel agent token — all
+#      written to root-owned 0600 files.
 #   6. Run `hanan install --apply --provision --provision-tty ...` so site
 #      identity, timezone, and Zigbee discovery reuse the installer's own
 #      provisioning logic.
@@ -26,6 +27,10 @@
 #   HANAN_LAN_CIDR            e.g. 192.168.1.0/24
 #   HANAN_OPERATOR_PASSWORD   provide instead of prompting
 #   HANAN_MQTT_PASSWORD       provide instead of prompting
+#   HANAN_BESZEL_TOKEN_FILE   path to a root-owned 0600 Beszel agent token
+#                             file, e.g. /root/beszel.token (else prompt)
+#   HANAN_BESZEL_HUB          set to 1 to install this box as the central
+#                             Beszel hub (no interactive prompt)
 #
 set -euo pipefail
 
@@ -134,8 +139,13 @@ The command that will run (interactively, from /dev/tty):
     --release-public-key .../pub.pem                                           \\
     --operator-password-file <root-owned 0600>                                 \\
     --mqtt-password-file <root-owned 0600>                                     \\
-    [--profile <profile>] [--lan-cidr <CIDR>]
+    [--profile <profile>] [--lan-cidr <CIDR>] [--beszel-hub]
 EOF
+  if [ -n "$BESZEL_TOKEN_FILE" ]; then
+    cat <<EOF
+    --beszel-token-file $BESZEL_TOKEN_FILE (root-owned 0600)
+EOF
+  fi
 }
 
 verify_public_key() {
@@ -278,6 +288,37 @@ prompt_lan_cidr() {
   fi
 }
 
+# Resolve the Beszel agent token. Secrets never appear on the command line:
+# the token is always read from a root-owned 0600 file, either the operator's
+# pre-staged HANAN_BESZEL_TOKEN_FILE or one written here from an interactive
+# hidden prompt. Empty means the agent stays dormant (Beszel disabled).
+resolve_beszel_override() {
+  BESZEL_HUB="${HANAN_BESZEL_HUB:-0}"
+  BESZEL_TOKEN_FILE="${HANAN_BESZEL_TOKEN_FILE:-}"
+  if [ -n "$BESZEL_TOKEN_FILE" ]; then
+    if ! { [ -f "$BESZEL_TOKEN_FILE" ] && [ -r "$BESZEL_TOKEN_FILE" ] &&
+           [ "$(id -u)" = "0" ] &&
+           [ "$(stat -c '%u:%a' "$BESZEL_TOKEN_FILE")" = "0:600" ]; }; then
+      fail "HANAN_BESZEL_TOKEN_FILE must be a root-owned mode-0600 readable file: $BESZEL_TOKEN_FILE"
+    fi
+  fi
+}
+
+prompt_beszel_token() {
+  local token=""
+  if [ -z "$BESZEL_TOKEN_FILE" ]; then
+    printf 'Beszel agent token (paste the hub universal token, hidden; Enter to skip): ' >/dev/tty
+    IFS= read -rs token </dev/tty || true
+    printf '\n' >/dev/tty
+    if [ -n "$token" ]; then
+      BESZEL_TOKEN_FILE="$(mktemp /root/.hanan-beszel-token.XXXXXX)"
+      printf '%s\n' "$token" >"$BESZEL_TOKEN_FILE"
+      chmod 0600 "$BESZEL_TOKEN_FILE"
+      info "beszel agent token: using $BESZEL_TOKEN_FILE"
+    fi
+  fi
+}
+
 run_apply() {
   local fdir="$1" args=()
   args=(
@@ -296,6 +337,8 @@ run_apply() {
   )
   [ -z "$PROFILE" ] || args+=(--profile "$PROFILE")
   [ -z "$LAN_CIDR" ] || args+=(--lan-cidr "$LAN_CIDR")
+  [ -z "$BESZEL_TOKEN_FILE" ] || args+=(--beszel-token-file "$BESZEL_TOKEN_FILE")
+  [ "$BESZEL_HUB" = "1" ] && args+=(--beszel-hub)
   hanan "${args[@]}"
 }
 
@@ -306,12 +349,18 @@ Password files (root-owned 0600, keep them out of backups):
   operator: $OPERATOR_PW_FILE
   mqtt:     $MQTT_PW_FILE
 EOF
+  if [ -n "$BESZEL_TOKEN_FILE" ]; then
+    cat >/dev/tty <<EOF
+  beszel:   $BESZEL_TOKEN_FILE
+EOF
+  fi
 }
 
 main() {
   check_root
   check_platform
   resolve_versions
+  resolve_beszel_override
 
   if [ "${1:-}" = "--dry-run" ] || [ "${1:-}" = "-n" ]; then
     print_plan
@@ -330,6 +379,7 @@ main() {
   prompt_deployment
   prompt_profile
   prompt_lan_cidr
+  prompt_beszel_token
 
   print_plan
   install -m 0755 "$staging/hanan-linux-$ARCH" /usr/local/bin/hanan
@@ -340,7 +390,7 @@ main() {
   else
     code=$?
     trap - EXIT
-    fail "installation failed (exit $code); fix the cause then retry: sudo hanan install --resume"
+    fail "installation failed (exit $code); fix the cause then retry: sudo hanan install --apply (or --resume to resume provisioning)"
   fi
 }
 

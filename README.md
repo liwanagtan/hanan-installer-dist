@@ -30,8 +30,8 @@ The bootstrap script will:
    manifest digest, and OpenSSL signature against `pub.pem`
    (key fingerprint is embedded in `bootstrap.sh`).
 5. Prompt (from `/dev/tty`, so `curl | bash` works) for deployment type,
-   optional Hanan Profile, optional LAN CIDR, and the operator/MQTT passwords
-   (written to root-owned 0600 files).
+   optional Hanan Profile, optional LAN CIDR, the operator/MQTT passwords,
+   and an optional Beszel agent token (all written to root-owned 0600 files).
 6. Run `hanan install --apply --provision --provision-tty ...` and print the
    Home Assistant onboarding follow-up.
 
@@ -54,6 +54,8 @@ Environment overrides (all optional):
 | `HANAN_LAN_CIDR` | e.g. `192.168.1.0/24` |
 | `HANAN_OPERATOR_PASSWORD` | Operator password (must still meet 16–128 chars, safe charset) |
 | `HANAN_MQTT_PASSWORD` | MQTT password (must differ from operator) |
+| `HANAN_BESZEL_TOKEN_FILE` | Path to a root-owned `0600` Beszel agent token file, e.g. `/root/beszel.token` (skips the interactive prompt) |
+| `HANAN_BESZEL_HUB` | `1` to install this box as the central Beszel hub |
 
 ## `<hanan>` command reference
 
