@@ -25,15 +25,21 @@ The bootstrap script will:
 
 1. Require root and a supported platform (Ubuntu, linux amd64/arm64).
 2. Read `version.json` to resolve the promoted installer/foundation versions.
-3. Download the `hanan` CLI binary and verify its SHA-256 checksum.
+3. Download the `hanan` CLI binary and verify its SHA-256 checksum. It is
+   installed to a private bootstrap path (`/usr/local/lib/hanan-bootstrap/hanan`),
+   not `/usr/local/bin/hanan`.
 4. Download the signed foundation release and verify the archive checksum,
    manifest digest, and OpenSSL signature against `pub.pem`
    (key fingerprint is embedded in `bootstrap.sh`).
 5. Prompt (from `/dev/tty`, so `curl | bash` works) for deployment type,
    optional Hanan Profile, optional LAN CIDR, the operator/MQTT passwords,
    and an optional Beszel agent token (all written to root-owned 0600 files).
-6. Run `hanan install --apply --provision --provision-tty ...` and print the
-   Home Assistant onboarding follow-up.
+6. Run `<installer> install --apply --provision --provision-tty ...` and print the
+   Home Assistant onboarding + post-install follow-up.
+
+The installer binary is bootstrap-only. Once the foundation is installed, the
+canonical operator CLI is the foundation bash CLI at `/usr/local/bin/hanan`,
+so you run operator commands via `sudo hanan <command>`.
 
 ### Preview without touching the system
 
@@ -57,11 +63,37 @@ Environment overrides (all optional):
 | `HANAN_BESZEL_TOKEN_FILE` | Path to a root-owned `0600` Beszel agent token file, e.g. `/root/beszel.token` (skips the interactive prompt) |
 | `HANAN_BESZEL_HUB` | `1` to install this box as the central Beszel hub |
 
+### After installing (post-onboarding)
+
+After the bootstrap completes, finish the installation in the browser and then
+via the foundation-native post-install flow:
+
+1. Open Home Assistant and complete onboarding, then create a long-lived
+   access token and a Cloudflare tunnel token.
+2. Save each token to its own root-owned mode-`0600` file (only the value):
+   ```bash
+   sudo sh -c 'umask 077; printf "%s\n" "<HA token>" > /root/ha.token'
+   sudo sh -c 'umask 077; printf "%s\n" "<tunnel token>" > /root/tunnel.token'
+   ```
+3. Run the foundation post-install to configure MQTT and start the HA-MCP
+   bridge and Cloudflare tunnel:
+   ```bash
+   sudo /opt/hanan/scripts/post-install.sh \
+     --token-file /root/ha.token \
+     --tunnel-token-file /root/tunnel.token --yes
+   ```
+
 ## `<hanan>` command reference
 
-`hanan` is a single binary with subcommands. Run `hanan` with no arguments to
-print usage. After `curl | bash` installs, `hanan` lives in the Foundation
-runtime and can be run via `sudo hanan <command>` (or `sudo /opt/hanan/scripts/hanan <command>`).
+There are two `hanan` CLI entry points:
+
+- **Installer binary** (`/usr/local/lib/hanan-bootstrap/hanan`): used by the
+  bootstrap for `install --apply` and `--resume` retries. It is not on `PATH`.
+- **Foundation bash CLI** (`/usr/local/bin/hanan`, also at
+  `/opt/hanan/scripts/hanan`): the canonical operator CLI after installation.
+  Run it via `sudo hanan <command>`.
+
+The table below is the operator (`/usr/local/bin/hanan`) command reference.
 
 | Command | Purpose |
 | --- | --- |

@@ -8,16 +8,17 @@
 # Responsibilities:
 #   1. Require root and a supported platform (Ubuntu, linux amd64/arm64).
 #   2. Resolve the pinned release versions from version.json.
-#   3. Download and checksum-verify the `hanan` CLI binary.
+#   3. Download and checksum-verify the `hanan` CLI binary (installed to a
+#      private bootstrap path, not /usr/local/bin/hanan).
 #   4. Download and verify the signed hanan-foundation release
 #      (archive checksum, manifest digest, and OpenSSL signature).
 #   5. Prompt (from /dev/tty) for deployment type, profile, LAN CIDR, the
 #      operator/MQTT passwords, and an optional Beszel agent token — all
 #      written to root-owned 0600 files.
-#   6. Run `hanan install --apply --provision --provision-tty ...` so site
+#   6. Run `<installer> install --apply --provision --provision-tty ...` so site
 #      identity, timezone, and Zigbee discovery reuse the installer's own
 #      provisioning logic.
-#   7. Print the manual Home Assistant onboarding follow-up.
+#   7. Print the Home Assistant onboarding + post-install follow-up.
 #
 # Environment overrides (for scripted installs):
 #   HANAN_INSTALLER_VERSION   pin installer version (default: version.json)
@@ -38,6 +39,13 @@ DIST_OWNER="liwanagtan"
 DIST_REPO="hanan-installer-dist"
 DIST_PATH="${DIST_OWNER}/${DIST_REPO}"
 RAW_BASE="https://raw.githubusercontent.com/${DIST_PATH}/main"
+
+# The `hanan` CLI binary is the bootstrap/installer only. The hanan-foundation
+# bash CLI owns /usr/local/bin/hanan (the canonical operator CLI once the
+# foundation is installed); the installer binary intentionally lives on its
+# own private path so a successful apply never clobbers it.
+INSTALLER_DIR="/usr/local/lib/hanan-bootstrap"
+INSTALLER_BIN="$INSTALLER_DIR/hanan"
 
 # SHA-256 of the DER-encoded release public key. Bumped on key rotation.
 EXPECTED_PUB_PEM_FINGERPRINT="176c8f8823289b2ac74483b874395f3e6f84e7e63337c66d39547de6d2546c6f"
@@ -130,7 +138,7 @@ Hanan Foundation bootstrap
 
 The command that will run (interactively, from /dev/tty):
 
-  hanan install --apply --provision --provision-tty \\
+  $INSTALLER_BIN install --apply --provision --provision-tty \\
     --deployment <customer|lab>                      \\
     --release-archive   .../hanan-foundation-$FOUNDATION_VERSION.tar.gz        \\
     --release-manifest  .../hanan-foundation-$FOUNDATION_VERSION.manifest.json \\
@@ -339,11 +347,28 @@ run_apply() {
   [ -z "$LAN_CIDR" ] || args+=(--lan-cidr "$LAN_CIDR")
   [ -z "$BESZEL_TOKEN_FILE" ] || args+=(--beszel-token-file "$BESZEL_TOKEN_FILE")
   [ "$BESZEL_HUB" = "1" ] && args+=(--beszel-hub)
-  hanan "${args[@]}"
+  "$INSTALLER_BIN" "${args[@]}"
 }
 
 print_follow_up() {
   cat >/dev/tty <<EOF
+
+Hanan Foundation installation completed.
+  Operator CLI (bash): /usr/local/bin/hanan
+  Installer  (bootstrap-only): $INSTALLER_BIN
+
+Finishing the installation (foundation-native flow):
+
+  1. Open Home Assistant and complete onboarding, then create a long-lived
+     access token and a Cloudflare tunnel token.
+  2. Save each token to its own root-owned mode-0600 file (only the value):
+       sudo sh -c 'umask 077; printf "%s\\n" "<HA token>" > /root/ha.token'
+       sudo sh -c 'umask 077; printf "%s\\n" "<tunnel token>" > /root/tunnel.token'
+  3. Run the foundation post-install to configure MQTT and start the
+     HA-MCP bridge and Cloudflare tunnel:
+       sudo /opt/hanan/scripts/post-install.sh \\
+         --token-file /root/ha.token \\
+         --tunnel-token-file /root/tunnel.token --yes
 
 Password files (root-owned 0600, keep them out of backups):
   operator: $OPERATOR_PW_FILE
@@ -382,15 +407,16 @@ main() {
   prompt_beszel_token
 
   print_plan
-  install -m 0755 "$staging/hanan-linux-$ARCH" /usr/local/bin/hanan
-  info "installed /usr/local/bin/hanan"
+  install -d -m 0755 "$INSTALLER_DIR"
+  install -m 0755 "$staging/hanan-linux-$ARCH" "$INSTALLER_BIN"
+  info "installed $INSTALLER_BIN"
 
   if run_apply "$fdir"; then
     print_follow_up
   else
     code=$?
     trap - EXIT
-    fail "installation failed (exit $code); fix the cause then retry: sudo hanan install --apply (or --resume to resume provisioning)"
+    fail "installation failed (exit $code); fix the cause then retry: $INSTALLER_BIN install --apply (or --resume to resume provisioning)"
   fi
 }
 
