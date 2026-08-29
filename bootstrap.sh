@@ -14,7 +14,9 @@
 #      (archive checksum, manifest digest, and OpenSSL signature).
 #   5. Prompt (from /dev/tty) for deployment type, profile, LAN CIDR, the
 #      operator/MQTT passwords, and an optional Beszel agent token — all
-#      written to root-owned 0600 files.
+#      written to root-owned 0600 files. Bounded decisions (deployment,
+#      profile, Beszel) are offered as numbered selection menus; only
+#      free-form values (customer/lab name, LAN CIDR) are typed.
 #   6. Run `<installer> install --apply --provision --provision-tty ...` so site
 #      identity, timezone, and Zigbee discovery reuse the installer's own
 #      provisioning logic.
@@ -68,6 +70,45 @@ ask() {
     answer="$default"
   fi
   printf -v "$var" '%s' "$answer"
+}
+
+# select_menu VAR "Prompt text" "opt1|opt2|..." [default_index]
+# Renders a numbered selection menu on /dev/tty. The operator picks by number;
+# an empty input selects the marked default. Re-prompts until valid.
+select_menu() {
+  local var="$1" prompt="$2" choices="$3" default_idx="${4:-}"
+  local IFS='|' choice_list=() choice i label line answer
+  choice_list=($choices)
+
+  while :; do
+    printf '%s:\n' "$prompt" >/dev/tty
+    i=1
+    for label in "${choice_list[@]}"; do
+      if [ -n "$default_idx" ] && [ "$i" = "$default_idx" ]; then
+        printf ' > %2d) %s\n' "$i" "$label" >/dev/tty
+      else
+        printf '   %2d) %s\n' "$i" "$label" >/dev/tty
+      fi
+      i=$((i + 1))
+    done
+    printf 'Select 1-%d (Enter for default): ' "${#choice_list[@]}" >/dev/tty
+    IFS= read -r line </dev/tty || return 1
+    line="$(printf '%s' "$line" | tr -d '\r')"
+    if [ -z "$line" ]; then
+      if [ -n "$default_idx" ]; then
+        printf -v "$var" '%s' "${choice_list[$((default_idx - 1))]}"
+        return 0
+      fi
+      continue
+    fi
+    if printf '%s' "$line" | grep -Eq '^[0-9]+$' &&
+       [ "$line" -ge 1 ] && [ "$line" -le "${#choice_list[@]}" ]; then
+      printf -v "$var" '%s' "${choice_list[$((line - 1))]}"
+      return 0
+    fi
+    printf 'bootstrap: invalid selection %q; enter a number between 1 and %d\n' \
+      "$line" "${#choice_list[@]}" >&2
+  done
 }
 
 check_root() {
@@ -262,7 +303,7 @@ prompt_deployment() {
   if [ -n "${HANAN_DEPLOYMENT:-}" ]; then
     DEPLOYMENT="$HANAN_DEPLOYMENT"
   else
-    ask DEPLOYMENT "Deployment type" ""
+    select_menu DEPLOYMENT "Select the deployment type" "customer|lab" 1 || DEPLOYMENT=""
   fi
   case "$DEPLOYMENT" in
     customer|lab) ;;
@@ -274,7 +315,11 @@ prompt_profile() {
   PROFILE="${HANAN_PROFILE:-}"
   if [ -z "$PROFILE" ]; then
     PROFILE=""
-    ask PROFILE "Hanan profile ($PROFILE_CHOICES, Enter to skip)" "" || PROFILE=""
+    select_menu PROFILE "Select a Hanan Profile" \
+      "home|rentals|business|farm|warehouse|none" 6 || PROFILE=""
+    if [ "$PROFILE" = "none" ]; then
+      PROFILE=""
+    fi
   fi
   if [ -n "$PROFILE" ]; then
     case ",$PROFILE," in
@@ -313,9 +358,13 @@ resolve_beszel_override() {
 }
 
 prompt_beszel_token() {
-  local token=""
+  local token="" choice=""
   if [ -z "$BESZEL_TOKEN_FILE" ]; then
-    printf 'Beszel agent token (paste the hub universal token, hidden; Enter to skip): ' >/dev/tty
+    select_menu choice "Beszel fleet-monitoring agent" "Skip (dormant agent)|Paste an agent token" 1 || choice="Skip (dormant agent)"
+    if [ "$choice" != "Paste an agent token" ]; then
+      return 0
+    fi
+    printf 'Beszel agent token (paste the hub universal token, hidden): ' >/dev/tty
     IFS= read -rs token </dev/tty || true
     printf '\n' >/dev/tty
     if [ -n "$token" ]; then
